@@ -1,5 +1,32 @@
 VIMC HPV runs (Jan 2020)
 
+Folders:
+- input - files downloaded from montagu
+
+            - central-burden-template.201910gavi-4.HPV_LSHTM-Jit_standard.csv
+            - stochastic-burden-template.201910gavi-4.HPV_LSHTM-Jit_standard.csv
+
+            - stochastic_template_params.csv
+
+            - coverage_201910gavi-4_hpv-no-vaccination.csv
+
+            - coverage_201910gavi-4_hpv-routine-default.csv
+            - coverage_201910gavi-4_hpv-campaign-default.csv
+
+            - coverage_201910gavi-4_hpv-routine-bestcase.csv  
+            - coverage_201910gavi-4_hpv-campaign-bestcase.csv
+
+              (routine refers to routine + campaign)
+
+- output - files to upload to montagu (central runs)
+
+            - psadat_vimc.csv   (stochastic parameters values)
+
+- output_psa - files to upload to dropbox (VIMC)
+
+- log - log files to keep track of simulation runs
+
+
 ----------------------------------------------------------------------
 Scenarios (5): 
 
