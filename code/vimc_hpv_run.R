@@ -14,7 +14,7 @@ library (foreach)
 library (doParallel)
 library (prime)
 
-rm (list = ls ())  # clear workspace
+# rm (list = ls ())  # clear workspace (DEBUG / uncomment this line later)
 #-------------------------------------------------------------------------------
 
 
@@ -23,21 +23,58 @@ rm (list = ls ())  # clear workspace
 #-------------------------------------------------------------------------------
 
 #-------------------------------------------------------------------------------
-# Generate vaccine impact estimates (central run)
+#' Generate vaccine impact estimates (VIMC central run)
+#'
+#' Genrate vaccine impact estimates for VIMC central runs. The inputs are 
+#'   vaccine coverage and disease burden template files and outputs are 
+#'   disease burden estimates (pre-vaccination and post-vaccination). 
+#'
+#' Three disease burden estimates are generated. 
+#'   (i)   disease burden estimates for no vaccination (vimc format)
+#'   (ii)  disease burden estimates for vaccination (vimc format)
+#'   (iii) disease burden estimates for vaccination (pre- and post-vaccination)
+#'   and includes YLDs and YLLs
+#'
+#' @param vaccine_coverage_file csv file (input), vaccine coverage data 
+#'   (vimc format)
+#' @param disease_burden_template_file csv file (input), disease burden template 
+#'   (vimc format)
+#' @param disease_burden_no_vaccination_file csv file (output), disease burden estimates
+#'   for no vaccination (vimc format) 
+#' @param disease_burden_vaccination_file csv file (output), disease burden estimates
+#'   for vaccination (vimc format) 
+#' @param disease_burden_results_file csv file (output), disease burden estimates
+#'   pre-vaccination and post-vaccination
+#' @param campaign_vaccination logical, indicates campaign vaccination 
+#' @param routine_vaccination logical, indicates routine vaccination
+#'
+#' @return 
+#' @export
+#'
+#' @examples EstimateVaccineImpactVimcCentral (
+#'   vaccine_coverage_file = "coverage_hpv-routine-default.csv",
+#'   disease_burden_template_file       = "central-burden-template.csv",
+#'   disease_burden_no_vaccination_file = "central_burden_no_vaccination.csv",
+#'   disease_burden_vaccination_file    = "central_burden_vaccination.csv",
+#'   disease_burden_results_file        = "central_burden_results.csv",
+#'   routine_vaccination                = TRUE,
+#'   campaign_vaccination               = TRUE)
+
 EstimateVaccineImpactVimcCentral <- function (vaccine_coverage_file,
                                               disease_burden_template_file,
                                               disease_burden_no_vaccination_file, 
                                               disease_burden_vaccination_file, 
                                               disease_burden_results_file, 
                                               campaign_vaccination, 
-                                              routine_vaccination) {
+                                              routine_vaccination, 
+                                              vaccine = "4vHPV") {
 
   # read files -- vaccination coverage
   vimc_coverage <- fread (vaccine_coverage_file)
   
   # read file -- central disease burden template
   vimc_template <- fread (disease_burden_template_file)
-  vimc_template <- vimc_template [country == "CHN"] # DEGBUG -- remove this line later
+  vimc_template <- vimc_template [country == "CHN"] # DEBUG -- remove this line later
   
   # register batch data for vimc runs
   RegisterBatchDataVimc (vimc_coverage             = vimc_coverage, 
@@ -49,8 +86,6 @@ EstimateVaccineImpactVimcCentral <- function (vaccine_coverage_file,
                          psa                       = 0)
   
   # log file to keep track of simulation run
-  # log_file <- paste0 (paste0 ("log/prime_log.log", 
-  #                             disease_burden_results_file)) 
   log_file <- "log/prime_log.log"
     
   # start of parallelisation
@@ -77,7 +112,7 @@ EstimateVaccineImpactVimcCentral <- function (vaccine_coverage_file,
                       unwpp_mortality                 = TRUE,
                       disability.weights              = "gbd_2017",
                       canc.inc                        = "2018",
-                      vaccine                         = "4vHPV"
+                      vaccine                         = vaccine
   )
   
   # end of parallelisation
@@ -94,14 +129,14 @@ EstimateVaccineImpactVimcCentral <- function (vaccine_coverage_file,
   
   # Saving output for no vaccination scenario (vimc format)
   no_vaccination <- convert_results [scenario == "pre-vaccination"]
-  no_vaccination <- no_vaccination  [, colnames (vimc_template), with=F]
+  no_vaccination <- no_vaccination  [, colnames (vimc_template), with=FALSE]
   no_vaccination <- no_vaccination  [!is.na(deaths)]
   fwrite (x    = no_vaccination, 
           file = disease_burden_no_vaccination_file)
   
   # Saving output for vaccination scenario (vimc format)
   vaccination <- convert_results [scenario == "post-vaccination"]
-  vaccination <- vaccination     [, colnames (vimc_template), with=F]
+  vaccination <- vaccination     [, colnames (vimc_template), with=FALSE]
   vaccination <- vaccination     [!is.na(deaths)]
   fwrite (x    = vaccination, 
           file = disease_burden_vaccination_file)
@@ -151,35 +186,68 @@ PlotVaccineImpactVimc <- function (diseaseBurdenCentralFile,
 #-------------------------------------------------------------------------------
 # main program - start 
 #-------------------------------------------------------------------------------
-
-tic ()  # start timer
+print (Sys.time ())  # current time
 
 # save current folder name and move to base folder
 current_folder <- getwd ()
-current_folder <- setwd ("D:/GitHub/vimc_hpv/code")  # DEBUG -- remove this line later
+# current_folder <- setwd ("D:/GitHub/vimc_hpv/code")  # DEBUG -- remove this line later
 setwd ("../")
 #-------------------------------------------------------------------------------
 
 # montangu touchstone
 touchstone <- "201910gavi-4"
 
-#-------------------------------------------------------------------------------
-# Generate vaccine impact estimates (central run)
-
 # central burden template file
 central_burden_template_file <- paste0 ("input/central-burden-template.", 
                                         touchstone, 
                                         ".HPV_LSHTM-Jit_standard.csv")
 
+#-------------------------------------------------------------------------------
+# initialisation for probabilistic sensitivity analysis
+run_psa    <- TRUE  # logical, run/not run PSA
+psa        <- 200   # number of runs for psa
+seed_state <- 1
+vaccine    <- "4vHPV"
+
+# files to save input parameter distributions for probabilistic sensitivity analysis
+psadat_file      <- "output/psadat.csv"      
+psadat_vimc_file <- paste0 ("output/stochastic_parameters_vimc_", 
+                            touchstone, ".csv")  # vimc format
+
+
+# generate input parameter distributions for probabilistic sensitivity analysis
+if (run_psa) {
+  
+  # Read in file with a column "country" containing iso3 country codes
+  country_table <- fread (central_burden_template_file)
+  
+  # get unique list of country codes (iso3)
+  country_codes <- unique (country_table [, country])
+  
+  # create psa data for probabilistic sensitivity analysis
+  psadat_list <- CreatePsaData (country_codes    = country_codes,
+                                vaccine          = vaccine,
+                                psa              = psa,
+                                seed_state       = seed_state, 
+                                psadat_file      = psadat_file,
+                                psadat_vimc_file = psadat_vimc_file)
+}
+#-------------------------------------------------------------------------------
+
+#-------------------------------------------------------------------------------
+# Generate vaccine impact estimates (central run)
+
 # scenarios
-scenarios <- c ("hpv-routine-default",
-                "hpv-routine-bestcase",
-                "hpv-campaign-default",
-                "hpv-campaign-bestcase")
-# scenarios <- c ("hpv-routine-default")  # DEGBUG -- remove this line later
+# scenarios <- c ("hpv-routine-default",
+#                 "hpv-routine-bestcase",
+#                 "hpv-campaign-default",
+#                 "hpv-campaign-bestcase")
+scenarios <- c ("hpv-routine-default")  # DEGBUG -- remove this line later
 
 # loop through different scenarios
 for (scenario in scenarios) {
+  
+  tic ()  # start timer
   
   # vaccination coverage filename
   # for routine vaccination: filename should contain "routine" 
@@ -233,10 +301,11 @@ for (scenario in scenarios) {
                                               touchstone, 
                                               "_", scenario, ".csv")
   
-  print (paste0 ("burden template:", central_burden_template_file))
+  print (paste0 ("burden template: ", central_burden_template_file))
   print (paste0 ("scenario: ", scenario))
   print (paste0 ("coverage: ", vaccine_coverage_file))
   
+  # Generate vaccine impact estimates (central run)
   EstimateVaccineImpactVimcCentral (
     vaccine_coverage_file              = vaccine_coverage_file,
     disease_burden_template_file       = central_burden_template_file,
@@ -244,53 +313,57 @@ for (scenario in scenarios) {
     disease_burden_vaccination_file    = central_burden_vaccination_file,
     disease_burden_results_file        = central_burden_results_file,
     routine_vaccination                = routine,
-    campaign_vaccination               = campaign
+    campaign_vaccination               = campaign, 
+    vaccine                            = vaccine
   )
   
-}
+  toc ()  # note current timer and compute elapsed time
+  
+  # probabilistic sensitivity analysis
+  if (run_psa) {
+    
+    # directory for stochastic burden files
+    stochastic_burden_dir <-  paste0 ("output_psa/",
+                                      scenario, "/")
 
+    
+    # loop through psa runs -- instead, loop through each country
+    for (run_i in 1:psa) {
+      
+      # filename for stochastic burden estimates
+      stochastic_burden_novaccination_file <- paste0 ("stochastic-burden-novaccination_", 
+                                                      touchstone, "_", 
+                                                      scenario, "_", 
+                                                      run_i, ".csv")
+      
+      stochastic_burden_vaccination_file <- paste0 ("stochastic-burden-vaccination_", 
+                                                    touchstone, "_", 
+                                                    scenario, "_", 
+                                                    run_i, ".csv")
+      
+      
+      
+      # Generate vaccine impact estimates (sensitivity analysis/stochastic runs)
+      EstimateVaccineImpactVimcStochastic (
+        resultsFile = central_burden_results_file,
+        psaDataFile,
+        countryCode,
+        diseaseBurdenStochasticFile,
+        fileNumber) 
+      
+      # 112 csv files with stochastic estimates; 1 file per country
+      
+    }
+  
+  
+} # end of loop -- for (scenario in scenarios)
 
-
-
-# 
-# # scenario: hpv-campaign-bestcase (campaign)
-# EstimateVaccineImpactVimcCentral (
-#   vaccine_coverage_file              = "input/coverage_201910gavi-4_hpv-campaign-bestcase.csv",
-#   disease_burden_template_file       = central_burden_template_file,
-#   disease_burden_no_vaccination_file = "output/central-burden-novaccination.201910gavi-4_hpv-campaign-bestcase.csv",
-#   disease_burden_vaccination_file    = "output/central-burden-vaccination.201910gavi-4_hpv-campaign-bestcase.csv",
-#   results_file                       = "output/central-burden-results.201910gavi-4_hpv-campaign-bestcase.csv",
-#   routine                            = FALSE,
-#   campaign                           = TRUE
-# )
-# 
-# # scenario: hpv-routine-default (routine + campaign)
-# EstimateVaccineImpactVimcCentral (
-#   vaccine_coverage_file              = "input/coverage_201910gavi-4_hpv-routine-default.csv",
-#   disease_burden_template_file       = central_burden_template_file,
-#   disease_burden_no_vaccination_file = "output/central-burden-novaccination.201910gavi-4_hpv-routine-default.csv",
-#   disease_burden_vaccination_file    = "output/central-burden-vaccination.201910gavi-4_hpv-routine-default.csv",
-#   results_file                       = "output/central-burden-results.201910gavi-4_hpv-routine-default.csv",
-#   routine                            = TRUE,
-#   campaign                           = TRUE
-# )
-# 
-# # scenario: hpv-campaign-default (campaign)
-# EstimateVaccineImpactVimcCentral (
-#   vaccine_coverage_file              = "input/coverage_201910gavi-4_hpv-campaign-default.csv",
-#   disease_burden_template_file       = central_burden_template_file,
-#   disease_burden_no_vaccination_file = "output/central-burden-novaccination.201910gavi-4_hpv-campaign-default.csv",
-#   disease_burden_vaccination_file    = "output/central-burden-vaccination.201910gavi-4_hpv-campaign-default.csv",
-#   results_file                       = "output/central-burden-results.201910gavi-4_hpv-campaign-default.csv",
-#   routine                            = FALSE,
-#   campaign                           = TRUE
-# )
 
 #-------------------------------------------------------------------------------
 # return to source file location/folder
 setwd (current_folder)
 
-toc ()  # note current timer and compute elapsed time
+print (Sys.time ())  # current time
 #-------------------------------------------------------------------------------
 # main program - end 
 #-------------------------------------------------------------------------------
