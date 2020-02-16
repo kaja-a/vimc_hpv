@@ -74,7 +74,7 @@ EstimateVaccineImpactVimcCentral <- function (vaccine_coverage_file,
   
   # read file -- central disease burden template
   vimc_template <- fread (disease_burden_template_file)
-  # vimc_template <- vimc_template [country == "CHN" | country == "IND"] # DEBUG -- comment this line later
+  # vimc_template <- vimc_template [country == "CHN"] # DEBUG -- comment this line later
   
   # register batch data for vimc runs
   RegisterBatchDataVimc (vimc_coverage             = vimc_coverage, 
@@ -353,9 +353,9 @@ EstimateVaccineImpactVimcStochastic <- function (disease_burden_template_file,
     } # end of -- for (run_id in 1:psa_runs)
     
     # save stochastic burden estimates of current country
-    fwrite (x      = stochastic_burden_country, 
-            file   = stochastic_file_country, 
-            append = FALSE)
+    # fwrite (x      = stochastic_burden_country, 
+    #         file   = stochastic_file_country, 
+    #         append = FALSE)
     
     # save stochastic burden estimates of current country to larger file with 
     # stochastic burden estimates of all countries
@@ -393,6 +393,7 @@ print (Sys.time ())  # current time
 # save current folder name and move to base folder
 current_folder <- getwd ()
 # current_folder <- setwd ("D:/GitHub/vimc_hpv/code")  # DEBUG -- remove this line later
+# current_folder <- setwd ("F:/201910gavi/hpv/code")   # DEBUG -- remove this line later
 setwd ("../")
 #-------------------------------------------------------------------------------
 
@@ -411,9 +412,9 @@ psa_runs   <- 200    # number of runs for psa
 seed_state <- 1
 vaccine    <- "4vHPV"
 
-# files to save input parameter distributions for probabilistic sensitivity analysis
-psadat_file      <- "output/psadat.csv"      
-psadat_vimc_file <- paste0 ("output/stochastic_parameters_vimc_", 
+# files to save input parameter distributions foFALSEr probabilistic sensitivity analysis
+psadat_file      <- "output_psa/psadat.csv"      
+psadat_vimc_file <- paste0 ("output_psa/stochastic_parameters_vimc_", 
                             touchstone, ".csv")  # vimc format
 
 
