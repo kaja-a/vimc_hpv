@@ -74,7 +74,7 @@ EstimateVaccineImpactVimcCentral <- function (vaccine_coverage_file,
   
   # read file -- central disease burden template
   vimc_template <- fread (disease_burden_template_file)
-  # vimc_template <- vimc_template [country == "CHN"] # DEBUG -- comment this line later
+  vimc_template <- vimc_template [country == "CHN"] # DEBUG -- comment this line later
   
   # register batch data for vimc runs
   RegisterBatchDataVimc (vimc_coverage             = vimc_coverage, 
@@ -407,10 +407,13 @@ central_burden_template_file <- paste0 ("input/central-burden-template.",
 
 #-------------------------------------------------------------------------------
 # initialisation for probabilistic sensitivity analysis
-run_psa    <- TRUE   # logical, run/not run PSA
-psa_runs   <- 200    # number of runs for psa
-seed_state <- 1
-vaccine    <- "4vHPV"
+run_central   <- TRUE  # logical, run/not run central analysis
+run_lhs       <- TRUE  # generate latin hyper sample of input parameters for psa
+run_psa       <- TRUE  # logical, run/not run PSA for vaccination scenarios
+run_psa_novac <- FALSE  # logical, run/not run PSA for no vaccination scenario
+psa_runs      <- 200   # number of runs for psa
+seed_state    <- 1
+vaccine       <- "4vHPV"
 
 # files to save input parameter distributions foFALSEr probabilistic sensitivity analysis
 psadat_file      <- "output_psa/psadat.csv"      
@@ -419,7 +422,7 @@ psadat_vimc_file <- paste0 ("output_psa/stochastic_parameters_vimc_",
 
 
 # generate input parameter distributions for probabilistic sensitivity analysis
-if (run_psa) {
+if (run_lhs) {
   
   # Read in file with a column "country" containing iso3 country codes
   country_table <- fread (central_burden_template_file)
@@ -442,7 +445,7 @@ scenarios <- c ("hpv-routine-default",
                 "hpv-routine-bestcase",
                 "hpv-campaign-default",
                 "hpv-campaign-bestcase")
-# scenarios <- c ("hpv-routine-default")  # DEBUG -- comment this line later
+scenarios <- c ("hpv-routine-default")  # DEBUG -- comment this line later
 
 # loop through different scenarios
 for (scenario in scenarios) {
@@ -508,16 +511,20 @@ for (scenario in scenarios) {
   print (paste0 ("coverage: ", vaccine_coverage_file))
   
   # Generate vaccine impact estimates (central run)
-  EstimateVaccineImpactVimcCentral (
-    vaccine_coverage_file              = vaccine_coverage_file,
-    disease_burden_template_file       = central_burden_template_file,
-    disease_burden_no_vaccination_file = central_burden_no_vaccination_file,
-    disease_burden_vaccination_file    = central_burden_vaccination_file,
-    disease_burden_results_file        = central_burden_results_file,
-    routine_vaccination                = routine,
-    campaign_vaccination               = campaign, 
-    vaccine                            = vaccine
-  )
+  # for vaccination scenario
+  if (run_central) {
+    
+    EstimateVaccineImpactVimcCentral (
+      vaccine_coverage_file              = vaccine_coverage_file,
+      disease_burden_template_file       = central_burden_template_file,
+      disease_burden_no_vaccination_file = central_burden_no_vaccination_file,
+      disease_burden_vaccination_file    = central_burden_vaccination_file,
+      disease_burden_results_file        = central_burden_results_file,
+      routine_vaccination                = routine,
+      campaign_vaccination               = campaign, 
+      vaccine                            = vaccine
+    )
+  }
   
   toc ()  # note current timer and compute elapsed time
   #-----------------------------------------------------------------------------
@@ -564,7 +571,7 @@ for (scenario in scenarios) {
 tic ()
 
 # probabilistic sensitivity analysis for no vaccination scenario
-if (run_psa) {
+if (run_psa_novac) {
 
   # directory for stochastic burden files
   stochastic_burden_dir <-  paste0 ("output_psa/",
