@@ -262,8 +262,12 @@ EstimateVaccineImpactVimcStochastic <- function (disease_burden_template_file,
     # generate post-hoc stochastic estimates for each run
     for (run_number in 1:psa_runs) {
       
+      # ------------------------------------------------------------------------
       # initialise burden estimate to central burden estimates
-      burden <- central_burden_country
+      # burden <- central_burden_country  # in this way, data table will work by reference
+      # make a copy of data table to avoid reference
+      burden <- copy (central_burden_country)
+      # ------------------------------------------------------------------------
       
       # ------------------------------------------------------------------------
       # probabilistic sensitivity analysis to generate stochastic estimates 
