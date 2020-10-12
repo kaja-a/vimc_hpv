@@ -149,7 +149,183 @@ EstimateVaccineImpactVimcCentral <- function (vaccine_coverage_file,
 
 #-------------------------------------------------------------------------------
 # CreatePsaData function will be inserted here
-
+CreatePSA_Data <- function (country_codes, 
+                            psa        = 0, 
+                            seed_state = 1) {
+  
+  # set seed for reproducibility
+  set.seed (seed = seed_state)  
+  
+  # sensitivity analysis
+  if (psa > 1) {
+    
+    # create empty psa data table (7 psa parameters)
+    psadat <- data.table (
+      country          = character (),
+      run_id           = numeric   (),
+      dw_diagnosis     = numeric   (),
+      dw_control       = numeric   (),
+      dw_metastatic    = numeric   (),
+      dw_terminal      = numeric   (),
+      incidence_ratio  = numeric   (),
+      mortality_ratio  = numeric   (),
+      prevalence_ratio = numeric   ()
+    )
+  }
+  
+  # cervical cancer phases
+  # 1 - diagnosis; 2 - control, 3 - metastatic; 4 - terminal
+  cecx_phases <- c ("diagnosis", "control", "metastatic", "terminal")
+  
+  # disease burden metrics
+  burden_metrics <- c ("incidence", "mortality", "prevalence")
+  
+  # number of parameters
+  parameters <- length (cecx_phases) + length (burden_metrics)
+  
+  # construct a random Latin hypercube design
+  cube <- randomLHS (n = psa, 
+                     k = parameters)
+  
+  # create data table specific for each country with parameter values for 
+  # probabilistic sensitivity analysis
+  for (country_code in country_codes) {
+    
+    #---------------------------------------------------------------------------
+    # disability weights -- psa values
+    #---------------------------------------------------------------------------
+    
+    # create data table to store psa values of 
+    # disability weights of different sequelaes (cancer phases) 
+    dw_psa_DT <- data.table (run_id = c (1:psa))
+    
+    # loop through disability weights of different sequelaes (cancer phases) 
+    for (i in 1:length (cecx_phases)) {
+      
+      # disability weight for a cancer phase -- mean and 95% uncertainty intervals
+      dw <- data.disability_weights [Source == "gbd_2017" & Sequela == cecx_phases [i], 
+                                     c(Mid, Low, High)]
+      names (dw) <- c("mid", "low", "high")
+      
+      # get shape parameters of beta distribution
+      shape_param <- betaExpert (best   = dw ["mid"], 
+                                 lower  = dw ["low"], 
+                                 upper  = dw ["high"], 
+                                 p      = 0.95,
+                                 method = "mean")
+      
+      # sample input parameter values (latin hyper cube sampling)
+      # based on their distributions for psa runs 
+      dw_psa_values <- qbeta (p      = cube [, i],
+                              shape1 = shape_param$alpha,
+                              shape2 = shape_param$beta)
+      
+      # data table of psa values containg 
+      # disability weights of different sequelaes (cancer phases)    
+      dw_psa_DT <- cbind (dw_psa_DT, dw_psa_values)
+      
+    } # end of loop -- for (i in 1:length (cecx_phases))
+    
+    # set column names for psa table of disability weights
+    names (dw_psa_DT) <- c ("run_id", 
+                            "dw_diagnosis", 
+                            "dw_control", 
+                            "dw_metastatic", 
+                            "dw_terminal")
+    
+    #---------------------------------------------------------------------------
+    # (incidence, mortality, prevalence) burden ratios -- psa values
+    #---------------------------------------------------------------------------
+    
+    # create data table to store psa values of 
+    # (incidence, mortality, prevalence) ratios
+    burden_psa_DT <- data.table ()
+    
+    # print (country_code)  # testing purposes (REMOVE this line later)
+    
+    # Among 112 VIMC countries
+    # Data available in globocan 2012 but not in globocan 2018
+    # KIR - Kiribati
+    # FSM - Micronesia (Federated States of)
+    # MHL - Marshall Islands
+    # TON - Tonga
+    # TUV - Tuvalu
+    # Data not available in globocan 2012 and globocan 2018
+    # XK  - Kosovo (substituted by ALB - Albania in PRIME analysis)
+    if (country_code != "FSM" & country_code != "KIR" & country_code != "MHL" &
+        country_code != "TON" & country_code != "TUV" & country_code != "XK") {
+      
+      # loop through burden ratios
+      for (i in 1:length (burden_metrics)) {
+        
+        # mean value and 95% uncertainty intervals -- incidence, mortality, prevalence
+        if (burden_metrics [i] == "incidence") {
+          burden  <- data.incidence_ui  [iso3 == country_code, c(Mid, Low, High)]
+        } 
+        else if (burden_metrics [i] == "mortality") {
+          burden  <- data.mortcecx_ui   [iso3 == country_code, c(Mid, Low, High)]
+        } 
+        else if (burden_metrics [i] == "prevalence") {
+          burden <- data.prevalence_ui [iso3 == country_code, c(Mid, Low, High)]
+        }
+        
+        names (burden)  <- c("mid", "low", "high")
+        
+        # log of burden values
+        log_burden  <- log (burden)
+        
+        # Estimating the global cancer incidence and mortality in 2018: 
+        # GLOBOCAN sources and methods
+        # (refer to paper for defintion of uncertainty intervals)
+        # https://www.ncbi.nlm.nih.gov/pubmed/30350310
+        
+        # standard error in log scale 
+        log_burden_se  <- (log_burden  ["high"] - log_burden ["low"]) / 3.92
+        
+        # sample input parameter values (latin hyper cube sampling)
+        # based on their distributions for psa runs 
+        burden_psa_values <- qlnorm (p       = cube [, (length (cecx_phases) + i)],
+                                     meanlog = log_burden ["mid"], 
+                                     sdlog   = log_burden_se)
+        
+        # ratio of psa values (incidence, mortality, prevalence) to mean values
+        burden_ratio  <- burden_psa_values / burden ["mid"]
+        
+        # data table of psa values containg 
+        # (incidence, mortality, prevalence) ratios    
+        burden_psa_DT <- cbind (burden_psa_DT, burden_ratio)
+        
+      } # end of loop -- for (i in 1:length (burden_metrics))
+      
+      # set column names for psa table of disability weights
+      names (burden_psa_DT) <- c ("incidence_ratio",
+                                  "mortality_ratio",
+                                  "prevalence_ratio")
+      
+      # create data table specific for this country with psa parameter values
+      country_psa <- data.table (
+        country = rep (x = country_code, times = psa), 
+        dw_psa_DT,
+        burden_psa_DT
+      )
+      
+      # add country specific table to full psa data table
+      psadat <- rbindlist (list (psadat, country_psa))
+      
+    } # end of -- if (country_code != "FSM" & ...
+    
+  } # end of loop -- for (country_code in countries)
+  
+  # reshape psa data table to wide format (for VIMC)
+  psadat_vimc <- dcast (psadat, 
+                        run_id ~ country,
+                        value.var = colnames (psadat [, -c("run_id", "country")]))
+  
+  # return psa data for probabilistic sensitivity analysis
+  return (list (psadat      = psadat, 
+                psadat_vimc = psadat_vimc))
+  
+} # end of function -- CreatePSAData
 #-------------------------------------------------------------------------------
 
 
