@@ -12,6 +12,7 @@ library (stringr)
 library (tictoc)
 library (foreach)
 library (doParallel)
+library (prevalence)
 library (prime)
 
 # rm (list = ls ())  # clear workspace (DEBUG / uncomment this line later)
@@ -147,31 +148,35 @@ EstimateVaccineImpactVimcCentral <- function (vaccine_coverage_file,
 #-------------------------------------------------------------------------------
 
 
-#-------------------------------------------------------------------------------
-# CreatePsaData function will be inserted here
-CreatePsaData <- function (country_codes, 
-                           psa        = 0, 
-                           seed_state = 1,
-                           psadat_file,
-                           psadat_vimc_file) {
+# ------------------------------------------------------------------------------
+# create psa data for probabilistic sensitivity analysis
+# generate random samples of input parameters based on their distributions
+# ------------------------------------------------------------------------------
+CreatePsaData <- function (country_codes,
+                           vaccine          = "4vHPV",
+                           psa_runs         = 0,
+                           seed_state       = 1, 
+                           psadat_file      = "psadat.csv",
+                           psadat_vimc_file = "psadat_vimc.csv") {
   
   # set seed for reproducibility
-  set.seed (seed = seed_state)  
+  set.seed (seed = seed_state)
   
   # sensitivity analysis
-  if (psa > 1) {
+  if (psa_runs > 1) {
     
-    # create empty psa data table (7 psa parameters)
+    # create empty psa data table (8 psa parameters)
     psadat <- data.table (
-      country          = character (),
-      run_id           = numeric   (),
-      dw_diagnosis     = numeric   (),
-      dw_control       = numeric   (),
-      dw_metastatic    = numeric   (),
-      dw_terminal      = numeric   (),
-      incidence_ratio  = numeric   (),
-      mortality_ratio  = numeric   (),
-      prevalence_ratio = numeric   ()
+      country                = character (),  # iso3 country code
+      run_id                 = numeric   (),  # run id (psa run)
+      dw_diagnosis           = numeric   (),  # disability weight - diagnosis phase
+      dw_control             = numeric   (),  # disability weight - control phase
+      dw_metastatic          = numeric   (),  # disability weight - metastatic phase
+      dw_terminal            = numeric   (),  # disability weight - terminal phase
+      incidence_ratio        = numeric   (),  # cervical cancer incidence ratio
+      mortality_ratio        = numeric   (),  # cervical cancer mortality ratio
+      prevalence_ratio       = numeric   (),  # cervical cancer prevalence ratio
+      hpv_distribution_ratio = numeric   ()   # hpv (types in vaccine) distribution ratio
     )
   }
   
@@ -182,159 +187,271 @@ CreatePsaData <- function (country_codes,
   # disease burden metrics
   burden_metrics <- c ("incidence", "mortality", "prevalence")
   
+  # hpv distribution
+  # HPV 16/18 for bivalent or quadrivalent vaccine  (4vHPV)
+  # HPV 16/18/31/31/45/52/58 for nonavalent vaccine (9vHPV)
+  
   # number of parameters
-  parameters <- length (cecx_phases) + length (burden_metrics)
+  parameters <- length (cecx_phases) + length (burden_metrics) + length (vaccine)
   
-  # construct a random Latin hypercube design
-  cube <- randomLHS (n = psa, 
-                     k = parameters)
-  
-  # create data table specific for each country with parameter values for 
+  # create data table specific for each country with parameter values for
   # probabilistic sensitivity analysis
   for (country_code in country_codes) {
+    
+    # construct a random Latin hypercube design
+    cube <- randomLHS (n = psa_runs,
+                       k = parameters)
+    
+    # --------------------------------------------------------------------------
+    # If no data available for a country, switch to another country as proxy
+    if ( country_code %in% c ("XK") ) {
+      proxy <- TRUE
+      country_code <- switch (
+        country_code,
+        "XK"  = "ALB",  # demography (unwpp) available for XK
+        # no data for burden, demography (who), cost for XK
+        country_code
+      )
+    } else {
+      proxy <- FALSE
+    }
+    # --------------------------------------------------------------------------
+    
     
     #---------------------------------------------------------------------------
     # disability weights -- psa values
     #---------------------------------------------------------------------------
     
-    # create data table to store psa values of 
-    # disability weights of different sequelaes (cancer phases) 
-    dw_psa_DT <- data.table (run_id = c (1:psa))
+    # create data table to store psa values of
+    # disability weights of different sequelaes (cancer phases)
+    dw_psa_DT <- data.table (run_id = c (1:psa_runs))
     
-    # loop through disability weights of different sequelaes (cancer phases) 
+    # loop through disability weights of different sequelaes (cancer phases)
     for (i in 1:length (cecx_phases)) {
       
       # disability weight for a cancer phase -- mean and 95% uncertainty intervals
-      dw <- data.disability_weights [Source == "gbd_2017" & Sequela == cecx_phases [i], 
+      dw <- data.disability_weights [Source == "gbd_2017" & Sequela == cecx_phases [i],
                                      c(Mid, Low, High)]
       names (dw) <- c("mid", "low", "high")
       
       # get shape parameters of beta distribution
-      shape_param <- betaExpert (best   = dw ["mid"], 
-                                 lower  = dw ["low"], 
-                                 upper  = dw ["high"], 
+      shape_param <- betaExpert (best   = dw ["mid"],
+                                 lower  = dw ["low"],
+                                 upper  = dw ["high"],
                                  p      = 0.95,
                                  method = "mean")
       
       # sample input parameter values (latin hyper cube sampling)
-      # based on their distributions for psa runs 
+      # based on their distributions for psa runs
       dw_psa_values <- qbeta (p      = cube [, i],
                               shape1 = shape_param$alpha,
                               shape2 = shape_param$beta)
       
-      # data table of psa values containg 
-      # disability weights of different sequelaes (cancer phases)    
+      # data table of psa values containg
+      # disability weights of different sequelaes (cancer phases)
       dw_psa_DT <- cbind (dw_psa_DT, dw_psa_values)
       
     } # end of loop -- for (i in 1:length (cecx_phases))
     
     # set column names for psa table of disability weights
-    names (dw_psa_DT) <- c ("run_id", 
-                            "dw_diagnosis", 
-                            "dw_control", 
-                            "dw_metastatic", 
+    names (dw_psa_DT) <- c ("run_id",
+                            "dw_diagnosis",
+                            "dw_control",
+                            "dw_metastatic",
                             "dw_terminal")
     
     #---------------------------------------------------------------------------
     # (incidence, mortality, prevalence) burden ratios -- psa values
     #---------------------------------------------------------------------------
     
-    # create data table to store psa values of 
+    # create data table to store psa values of
     # (incidence, mortality, prevalence) ratios
     burden_psa_DT <- data.table ()
     
-    # print (country_code)  # testing purposes (REMOVE this line later)
     
-    # Among 112 VIMC countries
-    # Data available in globocan 2012 but not in globocan 2018
-    # KIR - Kiribati
-    # FSM - Micronesia (Federated States of)
-    # MHL - Marshall Islands
-    # TON - Tonga
-    # TUV - Tuvalu
-    # Data not available in globocan 2012 and globocan 2018
-    # XK  - Kosovo (substituted by ALB - Albania in PRIME analysis)
-    if (country_code != "FSM" & country_code != "KIR" & country_code != "MHL" &
-        country_code != "TON" & country_code != "TUV" & country_code != "XK") {
+    # loop through burden ratios
+    for (i in 1:length (burden_metrics)) {
       
-      # loop through burden ratios
-      for (i in 1:length (burden_metrics)) {
+      # mean value and 95% uncertainty intervals -- incidence, mortality, prevalence
+      #
+      # incidence
+      if (burden_metrics [i] == "incidence") {
+        burden  <- data.incidence_ui  [iso3 == country_code, c(Mid, Low, High)]
         
-        # mean value and 95% uncertainty intervals -- incidence, mortality, prevalence
-        if (burden_metrics [i] == "incidence") {
-          burden  <- data.incidence_ui  [iso3 == country_code, c(Mid, Low, High)]
-        } 
-        else if (burden_metrics [i] == "mortality") {
-          burden  <- data.mortcecx_ui   [iso3 == country_code, c(Mid, Low, High)]
-        } 
-        else if (burden_metrics [i] == "prevalence") {
-          burden <- data.prevalence_ui [iso3 == country_code, c(Mid, Low, High)]
+        # set proxy values (incidence) for missing countries
+        # based around the median of available data for other countries
+        if (length (burden) == 0) {
+          burden <- c (1,
+                       median (data.incidence_ui$Low  / data.incidence_ui$Mid),
+                       median (data.incidence_ui$High / data.incidence_ui$Mid))
         }
+      }
+      # mortality
+      else if (burden_metrics [i] == "mortality") {
+        burden  <- data.mortcecx_ui   [iso3 == country_code, c(Mid, Low, High)]
         
-        names (burden)  <- c("mid", "low", "high")
+        # set proxy values (mortality) for missing countries
+        # based around the median of available data for other countries
+        if (length (burden) == 0) {
+          burden <- c (1,
+                       median (data.mortcecx_ui$Low  / data.mortcecx_ui$Mid),
+                       median (data.mortcecx_ui$High / data.mortcecx_ui$Mid))
+        }
+      }
+      # prevalence
+      else if (burden_metrics [i] == "prevalence") {
+        burden <- data.prevalence_ui [iso3 == country_code, c(Mid, Low, High)]
         
-        # log of burden values
-        log_burden  <- log (burden)
-        
-        # Estimating the global cancer incidence and mortality in 2018: 
-        # GLOBOCAN sources and methods
-        # (refer to paper for defintion of uncertainty intervals)
-        # https://www.ncbi.nlm.nih.gov/pubmed/30350310
-        
-        # standard error in log scale 
-        log_burden_se  <- (log_burden  ["high"] - log_burden ["low"]) / 3.92
-        
-        # sample input parameter values (latin hyper cube sampling)
-        # based on their distributions for psa runs 
-        burden_psa_values <- qlnorm (p       = cube [, (length (cecx_phases) + i)],
-                                     meanlog = log_burden ["mid"], 
-                                     sdlog   = log_burden_se)
-        
-        # ratio of psa values (incidence, mortality, prevalence) to mean values
-        burden_ratio  <- burden_psa_values / burden ["mid"]
-        
-        # data table of psa values containg 
-        # (incidence, mortality, prevalence) ratios    
-        burden_psa_DT <- cbind (burden_psa_DT, burden_ratio)
-        
-      } # end of loop -- for (i in 1:length (burden_metrics))
+        # set proxy values (prevalence) for missing countries
+        # based around the median of available data for other countries
+        if (length (burden) == 0) {
+          burden <- c (1,
+                       median (data.prevalence_ui$Low  / data.prevalence_ui$Mid),
+                       median (data.prevalence_ui$High / data.prevalence_ui$Mid))
+        }
+      }
       
-      # set column names for psa table of disability weights
-      names (burden_psa_DT) <- c ("incidence_ratio",
-                                  "mortality_ratio",
-                                  "prevalence_ratio")
+      names (burden)  <- c("mid", "low", "high")
       
-      # create data table specific for this country with psa parameter values
-      country_psa <- data.table (
-        country = rep (x = country_code, times = psa), 
-        dw_psa_DT,
-        burden_psa_DT
+      # log of burden values
+      log_burden  <- log (burden)
+      
+      # Estimating the global cancer incidence and mortality in 2018:
+      # GLOBOCAN sources and methods
+      # (refer to paper for defintion of uncertainty intervals)
+      # https://www.ncbi.nlm.nih.gov/pubmed/30350310
+      
+      # standard error in log scale
+      log_burden_se  <- (log_burden  ["high"] - log_burden ["low"]) / 3.92
+      
+      # sample input parameter values (latin hyper cube sampling)
+      # based on their distributions for psa runs
+      burden_psa_values <- qlnorm (p       = cube [, (length (cecx_phases) + i)],
+                                   meanlog = log_burden ["mid"],
+                                   sdlog   = log_burden_se)
+      
+      # ratio of psa values (incidence, mortality, prevalence) to mean values
+      burden_ratio  <- burden_psa_values / burden ["mid"]
+      
+      # data table of psa values containg
+      # (incidence, mortality, prevalence) ratios
+      burden_psa_DT <- cbind (burden_psa_DT, burden_ratio)
+      
+    } # end of loop -- for (i in 1:length (burden_metrics))
+    
+    # set column names for psa table of disability weights
+    names (burden_psa_DT) <- c ("incidence_ratio",
+                                "mortality_ratio",
+                                "prevalence_ratio")
+    
+    
+    
+    #---------------------------------------------------------------------------
+    # hpv distribution ratio -- psa values
+    #---------------------------------------------------------------------------
+    
+    # create data table to store psa values of
+    # hpv distribution
+    hpv_distribution_ratio_psa_DT <- data.table ()
+    
+    # hpv distribution -- mean and 95% uncertainty intervals
+    # HPV 16/18 for bivalent or quadrivalent vaccine  (4vHPV)
+    # HPV 16/18/31/31/45/52/58 for nonavalent vaccine (9vHPV)
+    if (vaccine == "4vHPV") {
+      
+      # Relative contribution of HPV 16/18 in ICC HPV-positive cases
+      hpv_distribution <- data.hpv_distribution [iso3 == country_code,
+                                                 c("hpv_4v", "hpv_4v_low", "hpv_4v_high")]
+    } else if (vaccine == "9vHPV") {
+      
+      # Relative contribution of HPV 16/18/31/33/45/52/58 in ICC HPV-positive cases
+      hpv_distribution <- data.hpv_distribution [iso3 == country_code,
+                                                 c("hpv_9v", "hpv_9v_low", "hpv_9v_high")]
+    }
+    
+    # change hpv distribution values from percentage to proportion
+    hpv_distribution <- hpv_distribution / 100
+    
+    # set names for values
+    names (hpv_distribution) <- c("mid", "low", "high")
+    
+    # get shape parameters of beta distribution
+    shape_param <- betaExpert (best   = hpv_distribution$mid,
+                               lower  = hpv_distribution$low,
+                               upper  = hpv_distribution$high,
+                               p      = 0.95,
+                               method = "mean")
+    
+    # sample input parameter values (latin hyper cube sampling)
+    # based on their distributions for psa runs
+    hpv_distribution_psa_values <- qbeta (p      = cube [, length (cecx_phases) +
+                                                           length (burden_metrics) +
+                                                           length (vaccine)],
+                                          shape1 = shape_param$alpha,
+                                          shape2 = shape_param$beta)
+    
+    # ratio of hpv distribution values to mean values
+    hpv_distribution_ratio_psa_values <- hpv_distribution_psa_values / hpv_distribution$mid
+    
+    # data table of psa values containing
+    # hpv distribution ratios
+    hpv_distribution_ratio_psa_DT <- cbind (hpv_distribution_ratio_psa_DT,
+                                            hpv_distribution_ratio_psa_values)
+    
+    # set column names for psa table of hpv distribution ratios
+    names (hpv_distribution_ratio_psa_DT) <- c ("hpv_distribution_ratio")
+    
+    
+    #---------------------------------------------------------------------------
+    
+    # --------------------------------------------------------------------------
+    # Switch back to original country for which proxy was set due to unavailable data
+    if (proxy) {
+      proxy <- FALSE
+      country_code <- switch (
+        country_code,
+        "ALB" = "XK",
+        country_code
       )
-      
-      # add country specific table to full psa data table
-      psadat <- rbindlist (list (psadat, country_psa))
-      
-    } # end of -- if (country_code != "FSM" & ...
+    }
+    # --------------------------------------------------------------------------
+    
+    # create data table specific for this country with psa parameter values
+    country_psa <- data.table (
+      country = rep (x = country_code, times = psa_runs),
+      dw_psa_DT,
+      burden_psa_DT,
+      hpv_distribution_ratio_psa_DT
+    )
+    
+    # add country specific table to full psa data table
+    psadat <- rbindlist (list (psadat, country_psa))
+    
     
   } # end of loop -- for (country_code in countries)
   
   # reshape psa data table to wide format (for VIMC)
-  psadat_vimc <- dcast (psadat, 
-                        run_id ~ country,
+  psadat_vimc <- dcast (data      = psadat,
+                        formula   = run_id ~ country,
+                        sep       = ":",
                         value.var = colnames (psadat [, -c("run_id", "country")]))
   
-  #-----------------------------------------------------------------------------
-  # save latin hyper cube sample of psa input parameters
-  fwrite (x    = psadat, 
+  # create list of psa data for internal runs and VIMC upload
+  psadat_list <- list (psadat      = psadat,
+                       psadat_vimc = psadat_vimc)
+  
+  # save parameters values for sensitivity analysis -- internal
+  fwrite (x    = psadat_list [["psadat"]],
           file = psadat_file)
   
-  fwrite (x    = psadat_vimc,
+  # save parameters values for sensitivity analysis -- VIMC upload
+  fwrite (x    = psadat_list [["psadat_vimc"]],
           file = psadat_vimc_file)
-  #-----------------------------------------------------------------------------
   
   # return psa data for probabilistic sensitivity analysis
-  return (list (psadat      = psadat, 
-                psadat_vimc = psadat_vimc))
+  # return (list (psadat      = psadat,
+  #               psadat_vimc = psadat_vimc))
+  return (psadat_list)
   
 } # end of function -- CreatePsaData
 #-------------------------------------------------------------------------------
@@ -421,7 +538,7 @@ EstimateVaccineImpactVimcStochastic <- function (disease_burden_template_file,
   }
   
   # get country codes
-  if (countryCodes == -1) {
+  if (countryCodes [1] == -1) {
     countryCodes <- unique (central_burden [, country])
   } 
   
@@ -602,7 +719,7 @@ run_central   <- FALSE  # logical, run/not run central analysis
 run_lhs       <- TRUE  # generate latin hyper sample of input parameters for psa
 run_psa       <- TRUE  # logical, run/not run PSA for vaccination scenarios
 run_psa_novac <- TRUE  # logical, run/not run PSA for no vaccination scenario
-psa_runs      <- 2   # number of runs for psa
+psa_runs      <- 200   # number of runs for psa
 seed_state    <- 1
 vaccine       <- "4vHPV"
 
@@ -622,8 +739,9 @@ if (run_lhs) {
   country_codes <- unique (country_table [, country])
   
   # create psa data for probabilistic sensitivity analysis
-  psadat_list <- CreatePsaData (country_codes    = country_codes,
-                                psa              = psa_runs,
+    psadat_list <- CreatePsaData (country_codes    = country_codes,
+                                vaccine          = vaccine,
+                                psa_runs         = psa_runs,
                                 seed_state       = seed_state, 
                                 psadat_file      = psadat_file,
                                 psadat_vimc_file = psadat_vimc_file)
@@ -635,7 +753,7 @@ scenarios <- c ("hpv-routine-default",
                 "hpv-routine-bestcase",
                 "hpv-campaign-default",
                 "hpv-campaign-bestcase")
-scenarios <- c ("hpv-routine-default")  # DEBUG -- comment this line later
+# scenarios <- c ("hpv-routine-default")  # DEBUG -- comment this line later
 
 # loop through different scenarios
 for (scenario in scenarios) {
@@ -745,7 +863,7 @@ for (scenario in scenarios) {
       diseaseBurdenStochasticFolder = stochastic_burden_dir,
       diseaseBurdenStochasticFile   = stochastic_burden_vaccination_file, 
       psa_runs                      = psa_runs, 
-      countryCodes                  = c("AFG", "IND"),
+      countryCodes                  = -1,
       vaccination_scenario          = TRUE
       ) 
   }
