@@ -411,11 +411,11 @@ central_burden_template_file <- paste0 ("input/central-burden-template.",
 
 #-------------------------------------------------------------------------------
 # initialisation for probabilistic sensitivity analysis
-run_central   <- TRUE  # logical, run/not run central analysis
-run_lhs       <- TRUE  # generate latin hyper sample of input parameters for psa
+run_central   <- FALSE  # logical, run/not run central analysis
+run_lhs       <- FALSE  # generate latin hyper sample of input parameters for psa
 run_psa       <- TRUE  # logical, run/not run PSA for vaccination scenarios
-run_psa_novac <- FALSE  # logical, run/not run PSA for no vaccination scenario
-psa_runs      <- 200   # number of runs for psa
+run_psa_novac <- TRUE  # logical, run/not run PSA for no vaccination scenario
+psa_runs      <- 2   # number of runs for psa
 seed_state    <- 1
 vaccine       <- "4vHPV"
 
@@ -559,7 +559,7 @@ for (scenario in scenarios) {
       diseaseBurdenStochasticFolder = stochastic_burden_dir,
       diseaseBurdenStochasticFile   = stochastic_burden_vaccination_file, 
       psa_runs                      = psa_runs, 
-      countryCodes                  = -1,
+      countryCodes                  = c("AFG", "IND"),
       vaccination_scenario          = TRUE
       ) 
   }
