@@ -149,9 +149,11 @@ EstimateVaccineImpactVimcCentral <- function (vaccine_coverage_file,
 
 #-------------------------------------------------------------------------------
 # CreatePsaData function will be inserted here
-CreatePSA_Data <- function (country_codes, 
-                            psa        = 0, 
-                            seed_state = 1) {
+CreatePsaData <- function (country_codes, 
+                           psa        = 0, 
+                           seed_state = 1,
+                           psadat_file,
+                           psadat_vimc_file) {
   
   # set seed for reproducibility
   set.seed (seed = seed_state)  
@@ -321,11 +323,20 @@ CreatePSA_Data <- function (country_codes,
                         run_id ~ country,
                         value.var = colnames (psadat [, -c("run_id", "country")]))
   
+  #-----------------------------------------------------------------------------
+  # save latin hyper cube sample of psa input parameters
+  fwrite (x    = psadat, 
+          file = psadat_file)
+  
+  fwrite (x    = psadat_vimc,
+          file = psadat_vimc_file)
+  #-----------------------------------------------------------------------------
+  
   # return psa data for probabilistic sensitivity analysis
   return (list (psadat      = psadat, 
                 psadat_vimc = psadat_vimc))
   
-} # end of function -- CreatePSAData
+} # end of function -- CreatePsaData
 #-------------------------------------------------------------------------------
 
 
@@ -588,14 +599,14 @@ central_burden_template_file <- paste0 ("input/central-burden-template.",
 #-------------------------------------------------------------------------------
 # initialisation for probabilistic sensitivity analysis
 run_central   <- FALSE  # logical, run/not run central analysis
-run_lhs       <- FALSE  # generate latin hyper sample of input parameters for psa
+run_lhs       <- TRUE  # generate latin hyper sample of input parameters for psa
 run_psa       <- TRUE  # logical, run/not run PSA for vaccination scenarios
 run_psa_novac <- TRUE  # logical, run/not run PSA for no vaccination scenario
 psa_runs      <- 2   # number of runs for psa
 seed_state    <- 1
 vaccine       <- "4vHPV"
 
-# files to save input parameter distributions foFALSEr probabilistic sensitivity analysis
+# files to save input parameter distributions for probabilistic sensitivity analysis
 psadat_file      <- "output_psa/psadat.csv"      
 psadat_vimc_file <- paste0 ("output_psa/stochastic_parameters_vimc_", 
                             touchstone, ".csv")  # vimc format
@@ -612,8 +623,7 @@ if (run_lhs) {
   
   # create psa data for probabilistic sensitivity analysis
   psadat_list <- CreatePsaData (country_codes    = country_codes,
-                                vaccine          = vaccine,
-                                psa_runs         = psa_runs,
+                                psa              = psa_runs,
                                 seed_state       = seed_state, 
                                 psadat_file      = psadat_file,
                                 psadat_vimc_file = psadat_vimc_file)
