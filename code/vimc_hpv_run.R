@@ -739,7 +739,7 @@ if (run_lhs) {
   country_codes <- unique (country_table [, country])
 
   # create psa data for probabilistic sensitivity analysis
-    psadat_list <- CreatePsaData (country_codes    = country_codes,
+  psadat_list <- CreatePsaData (country_codes    = country_codes,
                                 vaccine          = vaccine,
                                 psa_runs         = psa_runs,
                                 seed_state       = seed_state,
