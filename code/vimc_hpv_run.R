@@ -14,6 +14,7 @@ library (foreach)
 library (doParallel)
 library (prevalence)
 library (prime)
+library (lhs)
 
 # rm (list = ls ())  # clear workspace (DEBUG / uncomment this line later)
 #-------------------------------------------------------------------------------
